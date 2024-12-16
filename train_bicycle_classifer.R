@@ -30,9 +30,18 @@ data_dir <- file.path(base_dir, "data")
 output_dir <- file.path(base_dir, "output")
 dir.create(output_dir, showWarnings=FALSE, recursive=TRUE)
 
-
-
-
+filter_valid_genes <- function(gene.summary) {
+  # Remove genes with fewer than 3 exons (must have at least 1 internal exon)
+  valid_genes <- gene.summary %>%
+    filter(!is.na(exon_mean_length)) %>%  # This ensures we have internal exons
+    filter(!is.na(last_exon_length)) %>%  # This ensures we have a last exon
+    filter(num_total_exons >= 3)  # Explicit check for minimum exon count
+  
+  message(sprintf("Filtered from %d to %d genes based on exon count requirements", 
+                 nrow(gene.summary), nrow(valid_genes)))
+  
+  return(valid_genes)
+}
 
 generate_diagnostic_plots <- function(model, fit.summary, optimal_cutoff) {
   # Predict on training data
@@ -312,7 +321,10 @@ main <- function() {
   # Extract features
   message("Extracting gene features...")
   gene.summary <- extract_gene_features(gff.exons)
-  
+
+  message("Filtering genes based on exon count...")
+  gene.summary <- filter_valid_genes(gene.summary)
+	
   # Label genes
   message("Labeling genes...")
   bicycle_genes <- read.table(
