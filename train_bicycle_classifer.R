@@ -58,8 +58,11 @@ generate_diagnostic_plots <- function(model, fit.summary, optimal_cutoff) {
   predictor_data <- fit.summary %>% 
     select(total_exon_length, gene_length, first_exon_length, 
            last_exon_length, exon_mean_length, mode0, mode1, mode2)
+
+  sapply(predictor_data, function(x) sum(is.na(x)))
   
   corr_matrix <- cor(predictor_data)
+  print(corr_matrix)
   corr_melted <- melt(corr_matrix)
   colnames(corr_melted) <- c("predictor1", "predictor2", "correlation")
   
