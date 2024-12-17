@@ -240,12 +240,13 @@ extract_internal_exons <- function(gff.exons) {
 }
 
 # Function to label genes
-label_genes <- function(gene.summary, bicycle_genes) {
+label_genes <- function(gene.summary, bicycle_genes, annotated_transcripts) {
   gene.summary %>% 
     mutate(
       label = case_when(
         gsub("\\..*","", Parent) %in% gsub("\\..*","", bicycle_genes) ~ "bicycle",
-        TRUE ~ "non-bicycle"
+        Parent %in% annotated_transcripts ~ "annotated",
+        TRUE ~ "unannotated"  # these will be excluded from training
       )
     )
 }
@@ -327,16 +328,22 @@ main <- function() {
 	
   # Label genes
   message("Labeling genes...")
-  bicycle_genes <- read.table(
+ # Load both positive and negative training examples
+bicycle_genes <- read.table(
     file.path(data_dir, "reference/hcor_gene_cluster2.names"),
     stringsAsFactors=TRUE
-  )$V1
-  
-  gene.summary <- label_genes(gene.summary, bicycle_genes)
-  
-  # Prepare training data
-  message("Preparing training data...")
-  fit.summary <- gene.summary %>% 
+)$V1
+
+annotated_transcripts <- read.table(
+    file.path(data_dir, "reference/hcor_annotated_transcripts.txt"),
+    stringsAsFactors=TRUE
+)$V1
+
+# Label genes using both lists
+gene.summary <- label_genes(gene.summary, bicycle_genes, annotated_transcripts)
+
+# Prepare training data - now explicitly excluding unannotated
+fit.summary <- gene.summary %>% 
     filter(label != "unannotated") %>%
     mutate(response = if_else(label == "bicycle", 1, 0))
   
