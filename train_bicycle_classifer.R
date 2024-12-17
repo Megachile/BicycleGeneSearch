@@ -121,7 +121,7 @@ check_required_files <- function() {
   required_files <- c(
     file.path(data_dir, "reference/hcor_annotations.gff3"),
     file.path(data_dir, "reference/hcor_gene_cluster2.names"),
-    file.path(data_dir, "reference/hcor_bicycle_genes.txt")
+    file.path(data_dir, "reference/hcor_annotated_transcripts.txt")
   )
   
   missing_files <- required_files[!file.exists(required_files)]
@@ -129,7 +129,6 @@ check_required_files <- function() {
     stop("Missing required files:\n", paste(missing_files, collapse="\n"))
   }
 }
-
 # Function to extract gene features from GFF
 extract_gene_features <- function(gff.exons) {
   # General gene statistics
