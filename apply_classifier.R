@@ -1,6 +1,7 @@
 #!/usr/bin/env Rscript
 
 # Script to apply the bicycle gene classifier to B. kinseyi
+# Updated for GTF input format
 # Author: Created by Claude with Adam
 # Date: 2024-12-17
 
@@ -13,19 +14,27 @@ suppressPackageStartupMessages({
 })
 
 # Configuration
-INPUT_GFF <- "/export/martinsons/adam/bicycle_classifier/data/raw/bkin_annotations.gff3"
+INPUT_GTF <- "/export/martinsons/adam/bicycle_classifier/data/raw/bkinseyi_annotations.gtf"
 INPUT_MODEL <- "/export/martinsons/adam/bicycle_classifier/output/bicycle_classifier.rda"
 CUTOFF_FILE <- "/export/martinsons/adam/bicycle_classifier/output/optimal_cutoff.txt"
 OUTPUT_DIR <- "/export/martinsons/adam/bicycle_classifier/output/bkin_results"
 OUTPUT_PREFIX <- "bkin"
 
 # Function to predict bicycle genes
-predict_bicycle <- function(gff.cds, glm.model, cutoff, output_prefix, output_dir) {
-  # Format annotation file
-  gff.cds$Parent <- unlist(gff.cds$Parent)
+predict_bicycle <- function(gtf.file, glm.model, cutoff, output_prefix, output_dir) {
+  # Read GTF with rtracklayer, filtering for CDS features
+  gff.cds <- import(gtf.file)
+  gff.cds <- gff.cds[gff.cds$type == "CDS"]
+  
+  # Convert to data frame and ensure proper Parent/transcript_id handling
+  gff.cds <- as.data.frame(gff.cds)
+  if ("transcript_id" %in% colnames(gff.cds)) {
+    gff.cds$Parent <- gff.cds$transcript_id
+  }
+  
+  # Format Parent IDs
   parents <- unique(gff.cds$Parent)
   gff.cds$Parent <- factor(gff.cds$Parent, levels = parents)
-  gff.cds <- data.frame(gff.cds)
     
   # Calculate gene statistics
   exons.summary <- gff.cds %>%
@@ -33,13 +42,13 @@ predict_bicycle <- function(gff.cds, glm.model, cutoff, output_prefix, output_di
     group_by(Parent) %>%
     summarise(num_total_exons = n(), total_exon_length = sum(size))
   
-  # Gene length calculations
+  # Gene length calculations  
   gene.length.summary <- gff.cds %>%
     group_by(Parent) %>%
     summarise(
-      gene_start = dplyr::first(start), 
-      gene_end = dplyr::last(end), 
-      gene_length = abs(gene_end-gene_start)+1
+      gene_start = min(start),
+      gene_end = max(end),
+      gene_length = abs(max(end) - min(start)) + 1
     ) %>%
     select(Parent, gene_length)
     
@@ -50,26 +59,30 @@ predict_bicycle <- function(gff.cds, glm.model, cutoff, output_prefix, output_di
   # Calculate first/last exon lengths for positive strand
   pos.first.exons <- pos_strand %>% 
     group_by(Parent) %>% 
+    arrange(start) %>%
     filter(row_number() == 1) %>%
     mutate(size = end - start + 1) %>%
     summarise(first_exon_length = size)
     
   pos.last.exons <- pos_strand %>% 
     group_by(Parent) %>%
+    arrange(start) %>%
     filter(row_number() != 1 & row_number() == n()) %>%
     mutate(size = end - start + 1) %>%
     summarise(last_exon_length = size)
     
-  # Calculate first/last exon lengths for negative strand
+  # Calculate first/last exon lengths for negative strand  
   neg.first.exons <- neg_strand %>% 
     group_by(Parent) %>%
-    filter(row_number() == n()) %>%
+    arrange(desc(start)) %>%
+    filter(row_number() == 1) %>%
     mutate(size = end - start + 1) %>%
     summarise(first_exon_length = size)
     
   neg.last.exons <- neg_strand %>% 
     group_by(Parent) %>%
-    filter(row_number() == 1 & row_number() != n()) %>%
+    arrange(desc(start)) %>%
+    filter(row_number() != 1 & row_number() == n()) %>%
     mutate(size = end - start + 1) %>%
     summarise(last_exon_length = size)
   
@@ -79,15 +92,16 @@ predict_bicycle <- function(gff.cds, glm.model, cutoff, output_prefix, output_di
     
   # Process internal exons
   internal.exons <- gff.cds %>% 
-    group_by(Parent) %>% 
+    group_by(Parent) %>%
+    arrange(start) %>%
     filter(row_number() != 1 & row_number() != n())
   
   internal.exons.summary <- internal.exons %>%
     mutate(size = end - start + 1) %>%
     group_by(Parent) %>%
     summarise(
-      num_internal_exons = n(), 
-      exon_mean_length = mean(size), 
+      num_internal_exons = n(),
+      exon_mean_length = mean(size),
       exon_var = var(size),
       mode0 = sum(phase == 0),
       mode1 = sum(phase == 1),
@@ -99,17 +113,17 @@ predict_bicycle <- function(gff.cds, glm.model, cutoff, output_prefix, output_di
     merge(
       merge(
         merge(
-          exons.summary, 
-          gene.length.summary, 
-          by = "Parent", 
+          exons.summary,
+          gene.length.summary,
+          by = "Parent",
           all = TRUE
         ),
-        first.exons.summary, 
-        by = "Parent", 
+        first.exons.summary,
+        by = "Parent",
         all = TRUE
       ),
-      last.exons.summary, 
-      by = "Parent", 
+      last.exons.summary,
+      by = "Parent",
       all = TRUE
     ),
     internal.exons.summary,
@@ -156,17 +170,17 @@ predict_bicycle <- function(gff.cds, glm.model, cutoff, output_prefix, output_di
     width = 4,
     height = 4
   )
-  print(ggplot() + 
-    geom_histogram(aes(results$response), bins = 100) + 
+  print(ggplot() +
+    geom_histogram(aes(results$response), bins = 100) +
     scale_y_log10() +
     geom_vline(aes(xintercept = cutoff), color = "red") +
-    theme_classic() + 
+    theme_classic() +
     theme(
       legend.position = "none",
       axis.text = element_text(size = 16),
       axis.title = element_text(size = 18)
-    ) + 
-    xlab("Response") + 
+    ) +
+    xlab("Response") +
     ylab("Transcript count")
   )
   dev.off()
@@ -174,13 +188,12 @@ predict_bicycle <- function(gff.cds, glm.model, cutoff, output_prefix, output_di
 
 # Main execution
 main <- function() {
-  # Read inputs
-  gff.cds <- readGFF(INPUT_GFF, filter = list(type = "CDS"))
+  # Read input model and cutoff
   load(INPUT_MODEL) # Loads as glm.full
   cutoff <- as.numeric(readLines(CUTOFF_FILE)[1])
   
   # Run prediction
-  predict_bicycle(gff.cds, glm.full, cutoff, OUTPUT_PREFIX, OUTPUT_DIR)
+  predict_bicycle(INPUT_GTF, glm.full, cutoff, OUTPUT_PREFIX, OUTPUT_DIR)
 }
 
 # Execute main function
