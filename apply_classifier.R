@@ -1,10 +1,5 @@
 #!/usr/bin/env Rscript
 
-# Script to apply the bicycle gene classifier to B. kinseyi
-# Updated for GTF input format
-# Author: Created by Claude with Adam
-# Date: 2024-12-17
-
 # Load required libraries
 suppressPackageStartupMessages({
   library(dplyr)
@@ -16,16 +11,25 @@ suppressPackageStartupMessages({
 # Configuration
 INPUT_GTF <- "/export/martinsons/adam/bicycle_classifier/data/raw/bkinseyi_annotations.gtf"
 INPUT_MODEL <- "/export/martinsons/adam/bicycle_classifier/output/bicycle_classifier.rda"
-CUTOFF_FILE <- "/export/martinsons/adam/bicycle_classifier/output/optimal_cutoff.txt"
 OUTPUT_DIR <- "/export/martinsons/adam/bicycle_classifier/output/bkin_results"
 OUTPUT_PREFIX <- "bkin"
+CUTOFF <- 0.68  # Set directly from optimal_cutoff.txt
 
 # Function to predict bicycle genes
-predict_bicycle <- function(gtf.file, glm.model, cutoff, output_prefix, output_dir) {
+predict_bicycle <- function(gtf.file, model.file, cutoff, output_prefix, output_dir) {
   # Read GTF with rtracklayer, filtering for CDS features
+  message("Reading GTF file...")
   gff.cds <- import(gtf.file)
   gff.cds <- gff.cds[gff.cds$type == "CDS"]
   
+  # Load model
+  message("Loading model...")
+  e <- new.env()
+  load(model.file, envir=e)
+  model.name <- ls(e)[1]  # Get the first object name from the loaded environment
+  glm.model <- get(model.name, envir=e)
+  
+  message("Processing GTF data...")
   # Convert to data frame and ensure proper Parent/transcript_id handling
   gff.cds <- as.data.frame(gff.cds)
   if ("transcript_id" %in% colnames(gff.cds)) {
@@ -37,6 +41,7 @@ predict_bicycle <- function(gtf.file, glm.model, cutoff, output_prefix, output_d
   gff.cds$Parent <- factor(gff.cds$Parent, levels = parents)
     
   # Calculate gene statistics
+  message("Calculating gene statistics...")
   exons.summary <- gff.cds %>%
     mutate(size = end - start + 1) %>% 
     group_by(Parent) %>%
@@ -53,6 +58,7 @@ predict_bicycle <- function(gtf.file, glm.model, cutoff, output_prefix, output_d
     select(Parent, gene_length)
     
   # Process strand-specific features
+  message("Processing exon features...")
   pos_strand <- gff.cds %>% filter(strand == "+")
   neg_strand <- gff.cds %>% filter(strand == "-")
   
@@ -91,6 +97,7 @@ predict_bicycle <- function(gtf.file, glm.model, cutoff, output_prefix, output_d
   last.exons.summary <- rbind(pos.last.exons, neg.last.exons)
     
   # Process internal exons
+  message("Processing internal exons...")
   internal.exons <- gff.cds %>% 
     group_by(Parent) %>%
     arrange(start) %>%
@@ -109,6 +116,7 @@ predict_bicycle <- function(gtf.file, glm.model, cutoff, output_prefix, output_d
     )
   
   # Combine all statistics
+  message("Combining statistics...")
   gene.summary <- merge(
     merge(
       merge(
@@ -135,6 +143,7 @@ predict_bicycle <- function(gtf.file, glm.model, cutoff, output_prefix, output_d
   gene.summary <- gene.summary[complete.cases(gene.summary), ]
   
   # Run classifier
+  message("Running classifier...")
   predictions <- predict(glm.model, gene.summary, type="response")
   results <- data.frame(
     Parent = gene.summary$Parent,
@@ -144,6 +153,7 @@ predict_bicycle <- function(gtf.file, glm.model, cutoff, output_prefix, output_d
   # Create output directory if it doesn't exist
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   
+  message("Saving results...")
   # Save all results
   write.table(
     results,
@@ -158,13 +168,14 @@ predict_bicycle <- function(gtf.file, glm.model, cutoff, output_prefix, output_d
   bicycle.gene.names <- unique(gsub("\\.[^.]*$", "", bicycle.genes$Parent))
   write.table(
     bicycle.gene.names,
-    file.path(output_dir, paste0(output_prefix, "_classifier_bicycle_gene_names.txt")),
+    file.path(output_dir, paste0(output_prefix, "_classifier_bicycle_genes.txt")),
     quote = FALSE,
     row.names = FALSE,
     col.names = FALSE
   )
   
   # Generate response distribution plot
+  message("Generating plot...")
   pdf(
     file.path(output_dir, paste0(output_prefix, "_classifier_response_histogram.pdf")),
     width = 4,
@@ -184,17 +195,11 @@ predict_bicycle <- function(gtf.file, glm.model, cutoff, output_prefix, output_d
     ylab("Transcript count")
   )
   dev.off()
+  
+  message("Analysis complete!")
+  message(sprintf("Found %d potential bicycle genes", length(bicycle.gene.names)))
 }
 
 # Main execution
-main <- function() {
-  # Read input model and cutoff
-  load(INPUT_MODEL) # Loads as glm.full
-  cutoff <- as.numeric(readLines(CUTOFF_FILE)[1])
-  
-  # Run prediction
-  predict_bicycle(INPUT_GTF, glm.full, cutoff, OUTPUT_PREFIX, OUTPUT_DIR)
-}
-
-# Execute main function
-main()
+message("Starting bicycle gene classification...")
+predict_bicycle(INPUT_GTF, INPUT_MODEL, CUTOFF, OUTPUT_PREFIX, OUTPUT_DIR)
